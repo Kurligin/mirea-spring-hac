@@ -1,0 +1,86 @@
+# Пример server-block для системного nginx на сервере.
+# Положить в /etc/nginx/sites-available/mirea-spring-hac.conf,
+# затем `ln -s` в sites-enabled и `nginx -t && systemctl reload nginx`.
+#
+# Замените:
+#   DOMAIN_HERE                  → ваш домен (тот же, что в PUBLIC_BASE_URL)
+#   /opt/mirea-spring-hac        → путь, где лежит склонированный репо на сервере
+#
+# Перед этим должны быть выпущены TLS-сертификаты (certbot/acme.sh):
+#   certbot certonly --nginx -d DOMAIN_HERE
+
+server {
+    listen 80;
+    server_name DOMAIN_HERE;
+
+    # ACME-challenge оставьте, если будете обновлять серт через webroot
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name DOMAIN_HERE;
+
+    ssl_certificate     /etc/letsencrypt/live/DOMAIN_HERE/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_HERE/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    client_max_body_size 11M;
+
+    # Backend API
+    location /api/ {
+        proxy_pass http://127.0.0.1:8910;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Health-check (для мониторинга)
+    location = /health {
+        proxy_pass http://127.0.0.1:8910/health;
+        access_log off;
+    }
+
+    # Webhook от MAX (на long-poll не нужен, но оставлен на случай переключения)
+    location = /max/webhook {
+        proxy_pass http://127.0.0.1:8910;
+        proxy_set_header Host                       $host;
+        proxy_set_header X-Real-IP                  $remote_addr;
+        proxy_set_header X-Max-Bot-Api-Secret       $http_x_max_bot_api_secret;
+    }
+
+    # Публичный календарь .ics
+    location /api/calendar/ {
+        proxy_pass http://127.0.0.1:8910;
+        proxy_set_header Host $host;
+    }
+
+    # Загруженные обложки/медиа — отдаём напрямую файлы из bind-mount
+    location /media/ {
+        alias /opt/mirea-spring-hac/data/uploads/;
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Админка (React-SPA) — nginx-контейнер admin отдаёт статику и сам делает fallback на index.html
+    location /admin/ {
+        proxy_pass http://127.0.0.1:8980/;
+        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+    }
+
+    # Корень → редирект на админку (как в нашем dev nginx)
+    location = / {
+        return 302 /admin/;
+    }
+}

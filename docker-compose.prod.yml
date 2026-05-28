@@ -1,0 +1,33 @@
+# Прод-оверрайд: nginx терминирует TLS, сертификат Let's Encrypt через certbot.
+# Запуск:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Требует переменные в корневом .env:
+#   DEPLOY_DOMAIN     — домен с A-записью на этот сервер
+#   POSTGRES_PASSWORD — пароль БД (должен совпадать с DATABASE_URL в backend/.env.docker)
+#
+# Перед первым up — разовая выдача сертификата (см. DEPLOY.md).
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN}
+      # envsubst подставляет только ${DEPLOY_DOMAIN}, не трогая $host/$scheme и пр.
+      NGINX_ENVSUBST_FILTER: DEPLOY_DOMAIN
+    volumes:
+      - ./nginx/prod.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+
+  # Утилитарный контейнер: выдача и продление сертификата.
+  # Выдача — вручную через `docker compose run` (см. DEPLOY.md).
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+
+volumes:
+  letsencrypt:
+  certbot_webroot:

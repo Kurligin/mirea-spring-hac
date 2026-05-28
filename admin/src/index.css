@@ -1,0 +1,30 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+}
+
+/* Контрастный focus-ring для всех интерактивных элементов */
+*:focus-visible {
+  outline: 2px solid #2c54ee !important;
+  outline-offset: 2px !important;
+  border-radius: 4px;
+  transition: outline-offset 0.08s ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+  outline-offset: 3px !important;
+}
+
+/* Mantine inputs — focus-ring через box-shadow */
+.mantine-Input-input:focus,
+.mantine-Input-input:focus-within,
+.mantine-Textarea-input:focus,
+.mantine-Select-input:focus {
+  box-shadow: 0 0 0 3px rgba(44, 84, 238, 0.25) !important;
+}

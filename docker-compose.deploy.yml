@@ -1,0 +1,116 @@
+# Self-contained compose для раскатки за уже существующий nginx на сервере.
+#
+# Что внутри:
+#   postgres       (на внутренней docker-сети, наружу не публикуется)
+#   api-migrate    (одноразово прогоняет alembic upgrade head)
+#   api            127.0.0.1:8910  ←  системный nginx проксирует сюда /api/, /max/webhook, /health
+#   admin          127.0.0.1:8980  ←  системный nginx проксирует сюда /admin/
+#   uploads        bind ./data/uploads → /data/uploads (системный nginx отдаёт /media/)
+#
+# Запуск:
+#   cp .env.example .env                  # подставить POSTGRES_PASSWORD
+#   cp backend/.env.docker.example backend/.env.docker  # подставить секреты, PUBLIC_BASE_URL, токен
+#   mkdir -p data/uploads && chmod 755 data/uploads
+#   docker compose -f docker-compose.deploy.yml up -d --build
+#
+# Конфиг nginx для сервера — см. nginx/server.conf.example.
+#
+# Лимиты ресурсов рассчитаны под VPS 2 vCPU / 4 GB с системным nginx на хосте:
+# суммарный потолок памяти контейнеров ≈ 2.1 GB, ≈1.9 GB остаётся хосту.
+# deploy.resources.limits в Compose v2 работает и без swarm (docker compose up).
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mirea_max
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d mirea_max"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          memory: 256M
+
+  api-migrate:
+    build:
+      context: ./backend
+      target: prod
+    env_file: ./backend/.env.docker
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  api:
+    build:
+      context: ./backend
+      target: prod
+    env_file: ./backend/.env.docker
+    volumes:
+      # bind-mount, а не named volume, чтобы системный nginx мог читать файлы
+      - ./data/uploads:/data/uploads
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8910:8000"
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          memory: 256M
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    ports:
+      - "127.0.0.1:8980:80"
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+volumes:
+  postgres_data:

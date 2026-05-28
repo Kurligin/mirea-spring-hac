@@ -1,0 +1,78 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mirea_max
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d mirea_max"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *default-logging
+
+  api-migrate:
+    build:
+      context: ./backend
+      target: prod
+    env_file: ./backend/.env.docker
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  api:
+    build:
+      context: ./backend
+      target: prod
+    env_file: ./backend/.env.docker
+    volumes:
+      - attachments_data:/data/uploads
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+
+  nginx:
+    image: nginx:1.25-alpine
+    # Конфиг и порты задаются в оверрайдах: dev — HTTP-only, prod — HTTPS + certbot.
+    volumes:
+      - attachments_data:/var/www/media:ro
+    depends_on:
+      - api
+      - admin
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  attachments_data:
