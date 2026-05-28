@@ -126,12 +126,6 @@ cd admin && npm install && npm run dev           # http://localhost:5173 (proxy 
 cd backend && .venv/bin/pytest
 ```
 
-## Прод-деплой
-
-См. [DEPLOY.md](DEPLOY.md). Кратко: `ENVIRONMENT=production`, `MAX_TRANSPORT=webhook`,
-все секреты заменить на сгенерированные (`openssl rand -hex 32`), реальный `MAX_BOT_TOKEN`
-и `PUBLIC_BASE_URL`.
-
 ## Безопасность и секреты
 
 - Все значения в `*.example` — **dev-заглушки**, не для прода. Реальные `.env`,
